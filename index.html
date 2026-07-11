@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Attestor — PDF Signature Validator</title>
+<style>
+  @font-face {
+    font-family: 'system-serif';
+    src: local('Iowan Old Style'), local('Palatino Linotype'), local('Georgia');
+  }
+  :root{
+    --bg: #12161a;
+    --panel: #191f25;
+    --panel-raised: #1f2731;
+    --line: #2a333d;
+    --ink: #e9e4d6;
+    --muted: #8b95a1;
+    --verdigris: #4a7c74;
+    --verdigris-bright: #6ba89e;
+    --brass: #c9a227;
+    --brass-bright: #e0bc4a;
+    --red: #b3432b;
+    --red-bright: #d1573c;
+    --mono: 'SFMono-Regular', 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Georgia, 'Noto Serif', serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(74,124,116,0.10), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 100% 10%, rgba(201,162,39,0.06), transparent 55%),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  .wrap{ max-width: 880px; margin: 0 auto; padding: 56px 24px 100px; }
+
+  header{ margin-bottom: 40px; }
+  .eyebrow{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--verdigris-bright);
+    display:flex; align-items:center; gap:10px;
+    margin-bottom: 14px;
+  }
+  .eyebrow::before{
+    content:''; width:18px; height:1px; background: var(--verdigris-bright);
+  }
+  h1{
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 40px;
+    margin: 0 0 12px;
+    letter-spacing: -0.01em;
+  }
+  h1 em{ font-style: italic; color: var(--brass-bright); }
+  .lede{
+    color: var(--muted);
+    font-size: 15.5px;
+    max-width: 60ch;
+    margin: 0;
+  }
+
+  .card{
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .dropzone{
+    padding: 48px 32px;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    position: relative;
+  }
+  .dropzone:hover, .dropzone.drag{
+    background: var(--panel-raised);
+  }
+  .dropzone.drag{
+    outline: 1px dashed var(--verdigris-bright);
+    outline-offset: -8px;
+  }
+  .dz-icon{
+    width: 52px; height: 52px; margin: 0 auto 16px;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    display: flex; align-items:center; justify-content:center;
+    color: var(--verdigris-bright);
+  }
+  .dz-title{ font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .dz-sub{ font-size: 13px; color: var(--muted); font-family: var(--mono); }
+  input[type=file]{ display:none; }
+
+  .filebar{
+    display:none;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--panel-raised);
+  }
+  .filebar.show{ display:flex; }
+  .filebar .name{ color: var(--ink); }
+  .filebar .clear{ color: var(--muted); cursor:pointer; background:none; border:none; font-family: var(--mono); font-size:13px; }
+  .filebar .clear:hover{ color: var(--red-bright); }
+
+  .actions{ padding: 20px 24px; display:flex; gap: 12px; }
+  button.run{
+    background: var(--verdigris);
+    color: #f4f1e8;
+    border: 1px solid var(--verdigris-bright);
+    padding: 11px 20px;
+    border-radius: 2px;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  button.run:hover:not(:disabled){ background: var(--verdigris-bright); }
+  button.run:disabled{ opacity: 0.4; cursor: not-allowed; }
+  button.secondary{
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    padding: 11px 20px;
+    border-radius: 2px;
+    font-family: var(--sans);
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button.secondary:hover:not(:disabled){ border-color: var(--brass); color: var(--brass-bright); }
+  button.secondary:disabled{ opacity: 0.4; cursor: not-allowed; }
+
+  /* ---- results ---- */
+  #results{ margin-top: 32px; display:none; }
+  #results.show{ display:block; }
+
+  .verdict{
+    display:flex; align-items:center; gap: 24px;
+    padding: 28px 24px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--panel);
+    margin-bottom: 20px;
+  }
+  .seal{
+    flex: 0 0 auto;
+    width: 76px; height: 76px;
+    border-radius: 50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size: 34px;
+    position: relative;
+    font-family: var(--serif);
+  }
+  .seal.valid{
+    border: 2px solid var(--brass);
+    color: var(--brass-bright);
+    box-shadow: 0 0 0 4px rgba(201,162,39,0.08), inset 0 0 14px rgba(201,162,39,0.12);
+  }
+  .seal.invalid{
+    border: 2px solid var(--red);
+    color: var(--red-bright);
+    box-shadow: 0 0 0 4px rgba(179,67,43,0.08), inset 0 0 14px rgba(179,67,43,0.12);
+  }
+  .seal::after{
+    content:'';
+    position:absolute; inset:-8px;
+    border-radius: 50%;
+    border: 1px dashed currentColor;
+    opacity: 0.35;
+  }
+  .verdict-text .vt-title{
+    font-family: var(--serif);
+    font-size: 22px;
+    margin: 0 0 4px;
+  }
+  .verdict-text .vt-sub{
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .sig-card{
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--panel);
+    margin-bottom: 14px;
+    overflow:hidden;
+  }
+  .sig-head{
+    padding: 14px 20px;
+    display:flex; justify-content:space-between; align-items:center;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-raised);
+  }
+  .sig-head .fname{ font-family: var(--mono); font-size: 13px; }
+  .pill{
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 20px;
+    letter-spacing: 0.03em;
+  }
+  .pill.ok{ background: rgba(201,162,39,0.12); color: var(--brass-bright); border: 1px solid rgba(201,162,39,0.4); }
+  .pill.bad{ background: rgba(179,67,43,0.12); color: var(--red-bright); border: 1px solid rgba(179,67,43,0.4); }
+
+  .kv{ padding: 6px 20px; }
+  .kv-row{
+    display:flex; padding: 9px 0; border-bottom: 1px solid var(--line);
+    font-size: 13.5px;
+  }
+  .kv-row:last-child{ border-bottom: none; }
+  .kv-row .k{ flex: 0 0 220px; color: var(--muted); font-family: var(--mono); font-size: 12px; padding-top:1px;}
+  .kv-row .v{ flex:1; }
+  .chain{
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    font-family: var(--mono); font-size: 12px;
+  }
+  .chain .node{
+    padding: 3px 8px; border: 1px solid var(--line); border-radius: 2px; background: var(--panel-raised);
+  }
+  .chain .arrow{ color: var(--muted); }
+
+  .error-note{
+    margin: 10px 20px 16px;
+    padding: 10px 12px;
+    border-left: 2px solid var(--red);
+    background: rgba(179,67,43,0.07);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--red-bright);
+  }
+
+  .empty-note{
+    padding: 18px 20px;
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+
+  footer{
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+
+  .spin{
+    width:16px; height:16px; border-radius:50%;
+    border: 2px solid rgba(244,241,232,0.25);
+    border-top-color: #f4f1e8;
+    animation: sp 0.7s linear infinite;
+    display:inline-block; vertical-align: -3px; margin-right:8px;
+  }
+  @keyframes sp{ to{ transform: rotate(360deg); } }
+
+  @media (prefers-reduced-motion: reduce){
+    .spin{ animation: none; }
+  }
+  @media (max-width: 560px){
+    h1{ font-size: 30px; }
+    .kv-row{ flex-direction: column; }
+    .kv-row .k{ flex: none; margin-bottom: 2px; }
+  }
+
+  :focus-visible{ outline: 2px solid var(--verdigris-bright); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Digital Signature &amp; Trust-Chain Verification</div>
+    <h1>Attestor<br><em>reads the seal, not the stamp.</em></h1>
+    <p class="lede">
+      Upload a signed PDF. Attestor recomputes the signed hash, walks the
+      certificate chain to your configured trust anchors, and checks
+      revocation — the same three checks Adobe collapses into a single
+      icon in the signature panel.
+    </p>
+  </header>
+
+  <div class="card">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload PDF">
+      <div class="dz-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M12 3v12m0-12l-4 4m4-4l4 4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="dz-title">Drop a signed PDF here, or click to browse</div>
+      <div class="dz-sub">.pdf · up to 25MB</div>
+      <input type="file" id="fileInput" accept="application/pdf" />
+    </div>
+
+    <div class="filebar" id="filebar">
+      <span class="name" id="fileName"></span>
+      <button class="clear" id="clearBtn">clear ✕</button>
+    </div>
+
+    <div class="actions">
+      <button class="run" id="checkBtn" disabled>Verify signature</button>
+      <button class="secondary" id="stampBtn" disabled>Download report PDF</button>
+    </div>
+  </div>
+
+  <div id="results"></div>
+
+  <footer>
+    ATTESTOR/1.0 · self-hosted · trust anchors configured server-side in /backend/trust_anchors
+  </footer>
+</div>
+
+<script>
+// ⬇️ PASTE YOUR RENDER BACKEND URL HERE (from Step 1 below), then re-upload this file.
+// Example: "https://attestor-backend-abcd.onrender.com"
+const API_BASE = "http://localhost:8000";
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const filebar = document.getElementById('filebar');
+const fileName = document.getElementById('fileName');
+const clearBtn = document.getElementById('clearBtn');
+const checkBtn = document.getElementById('checkBtn');
+const stampBtn = document.getElementById('stampBtn');
+const results = document.getElementById('results');
+
+let currentFile = null;
+
+function setFile(f){
+  if(!f) return;
+  if(f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')){
+    alert('Please select a PDF file.');
+    return;
+  }
+  currentFile = f;
+  fileName.textContent = `${f.name} · ${(f.size/1024).toFixed(1)} KB`;
+  filebar.classList.add('show');
+  checkBtn.disabled = false;
+  stampBtn.disabled = false;
+  results.classList.remove('show');
+  results.innerHTML = '';
+}
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('keydown', (e) => { if(e.key==='Enter' || e.key===' ') fileInput.click(); });
+fileInput.addEventListener('change', (e) => setFile(e.target.files[0]));
+
+['dragenter','dragover'].forEach(evt =>
+  dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('drag'); })
+);
+['dragleave','drop'].forEach(evt =>
+  dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('drag'); })
+);
+dropzone.addEventListener('drop', (e) => {
+  const f = e.dataTransfer.files[0];
+  setFile(f);
+});
+
+clearBtn.addEventListener('click', () => {
+  currentFile = null;
+  fileInput.value = '';
+  filebar.classList.remove('show');
+  checkBtn.disabled = true;
+  stampBtn.disabled = true;
+  results.classList.remove('show');
+  results.innerHTML = '';
+});
+
+function esc(s){
+  if(s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderResults(data){
+  results.classList.add('show');
+  const overall = data.overall_valid;
+  let html = `
+    <div class="verdict">
+      <div class="seal ${overall ? 'valid' : 'invalid'}">${overall ? '✓' : '✕'}</div>
+      <div class="verdict-text">
+        <div class="vt-title">${overall ? 'Signature valid & trusted' : 'Signature not fully valid'}</div>
+        <div class="vt-sub">${esc(data.filename)} · ${data.signature_count} signature${data.signature_count===1?'':'s'} found</div>
+      </div>
+    </div>
+  `;
+
+  if(data.signature_count === 0){
+    html += `<div class="sig-card"><div class="empty-note">No embedded digital signatures were found in this document.</div></div>`;
+  }
+
+  for(const sig of data.signatures){
+    const okPill = sig.overall_valid
+      ? `<span class="pill ok">intact &amp; trusted</span>`
+      : `<span class="pill bad">${!sig.intact ? 'tampered' : 'not trusted'}</span>`;
+
+    html += `
+      <div class="sig-card">
+        <div class="sig-head">
+          <span class="fname">field: ${esc(sig.field_name)}</span>
+          ${okPill}
+        </div>
+        <div class="kv">
+          <div class="kv-row"><div class="k">SIGNER</div><div class="v">${esc(sig.signer_cn || 'Unknown')}</div></div>
+          <div class="kv-row"><div class="k">ISSUING CA</div><div class="v">${esc(sig.issuer || 'Unknown')}</div></div>
+          <div class="kv-row"><div class="k">SIGNING TIME</div><div class="v">${esc(sig.signing_time || 'Not available')}</div></div>
+          <div class="kv-row"><div class="k">DOCUMENT INTACT</div><div class="v">${sig.intact ? 'Yes — hash matches signed byte range' : 'No — content modified after signing'}</div></div>
+          <div class="kv-row"><div class="k">CHAIN TRUSTED</div><div class="v">${sig.trusted ? 'Yes — chains to a configured trust anchor' : 'No — root not in trust anchor set'}</div></div>
+          <div class="kv-row"><div class="k">REVOCATION</div><div class="v">${sig.revocation_ok === true ? 'Not revoked' : sig.revocation_ok === false ? 'REVOKED' : 'Unknown / not checked'}</div></div>
+          <div class="kv-row"><div class="k">COVERAGE</div><div class="v">${esc(sig.coverage.replace(/_/g,' '))}</div></div>
+        </div>
+        ${sig.errors && sig.errors.length ? `<div class="error-note">${sig.errors.map(esc).join('<br>')}</div>` : ''}
+      </div>
+    `;
+  }
+
+  results.innerHTML = html;
+}
+
+checkBtn.addEventListener('click', async () => {
+  if(!currentFile) return;
+  checkBtn.disabled = true;
+  checkBtn.innerHTML = `<span class="spin"></span>Verifying…`;
+  results.classList.remove('show');
+  try{
+    const form = new FormData();
+    form.append('file', currentFile);
+    const res = await fetch(`${API_BASE}/api/validate`, { method: 'POST', body: form });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({detail:'Unknown error'}));
+      throw new Error(err.detail || 'Validation failed');
+    }
+    const data = await res.json();
+    renderResults(data);
+  }catch(e){
+    results.classList.add('show');
+    results.innerHTML = `<div class="sig-card"><div class="error-note">${esc(e.message)}</div></div>`;
+  }finally{
+    checkBtn.disabled = false;
+    checkBtn.textContent = 'Verify signature';
+  }
+});
+
+stampBtn.addEventListener('click', async () => {
+  if(!currentFile) return;
+  stampBtn.disabled = true;
+  const originalLabel = stampBtn.textContent;
+  stampBtn.innerHTML = `<span class="spin"></span>Preparing…`;
+  try{
+    const form = new FormData();
+    form.append('file', currentFile);
+    const res = await fetch(`${API_BASE}/api/validate-and-stamp`, { method: 'POST', body: form });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({detail:'Unknown error'}));
+      throw new Error(err.detail || 'Failed to generate report');
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (currentFile.name.replace(/\.pdf$/i,'') || 'document') + '_validated.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){
+    alert(e.message);
+  }finally{
+    stampBtn.disabled = false;
+    stampBtn.textContent = originalLabel;
+  }
+});
+</script>
+</body>
+</html>
