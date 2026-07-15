@@ -28,6 +28,7 @@ from dataclasses import asdict
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from validator import validate_pdf
 from report_stamper import append_validation_report
@@ -60,7 +61,11 @@ async def _read_and_check(file: UploadFile) -> bytes:
 async def api_validate(file: UploadFile = File(...)):
     data = await _read_and_check(file)
     try:
-        result = validate_pdf(data, filename=file.filename or "uploaded.pdf")
+        # validate_pdf internally calls asyncio.run() (via pyhanko-certvalidator's
+        # revocation fetching), which is not allowed inside an already-running
+        # event loop (this async route). Running it in a thread gives it its
+        # own loop instead of colliding with FastAPI's.
+        result = await run_in_threadpool(validate_pdf, data, file.filename or "uploaded.pdf")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Could not parse/validate PDF: {exc}") from exc
 
@@ -78,7 +83,7 @@ async def api_validate(file: UploadFile = File(...)):
 async def api_validate_and_stamp(file: UploadFile = File(...)):
     data = await _read_and_check(file)
     try:
-        result = validate_pdf(data, filename=file.filename or "uploaded.pdf")
+        result = await run_in_threadpool(validate_pdf, data, file.filename or "uploaded.pdf")
         stamped = append_validation_report(data, result)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Could not validate/stamp PDF: {exc}") from exc
