@@ -329,8 +329,8 @@
 <script>
 // ⬇️ PASTE YOUR RENDER BACKEND URL HERE (from Step 1 below), then re-upload this file.
 // Example: "https://attestor-backend-abcd.onrender.com"
-const API_BASE = "https://attestor-backend.onrender.com/api/health";
-//const API_BASE = "http://localhost:8000";
+const API_BASE = "http://localhost:8000";
+
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 const filebar = document.getElementById('filebar');
@@ -409,6 +409,12 @@ function renderResults(data){
       ? `<span class="pill ok">intact &amp; trusted</span>`
       : `<span class="pill bad">${!sig.intact ? 'tampered' : 'not trusted'}</span>`;
 
+    const canTrust = sig.intact && !sig.trusted;
+    const trustButton = canTrust
+      ? `<button class="secondary trust-btn" data-sig-index="${idx - 1}" style="margin-top:12px;">Trust this signer</button>
+         <div class="trust-note" style="display:none; margin-top:8px; font-size:12px; color:var(--muted); font-family:var(--mono);"></div>`
+      : '';
+
     html += `
       <div class="sig-card">
         <div class="sig-head">
@@ -425,11 +431,42 @@ function renderResults(data){
           <div class="kv-row"><div class="k">COVERAGE</div><div class="v">${esc(sig.coverage.replace(/_/g,' '))}</div></div>
         </div>
         ${sig.errors && sig.errors.length ? `<div class="error-note">${sig.errors.map(esc).join('<br>')}</div>` : ''}
+        ${trustButton ? `<div style="padding: 0 20px 18px;">${trustButton}</div>` : ''}
       </div>
     `;
   }
 
   results.innerHTML = html;
+
+  document.querySelectorAll('.trust-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = btn.dataset.sigIndex;
+      const noteEl = btn.nextElementSibling;
+      btn.disabled = true;
+      btn.textContent = 'Trusting…';
+      try {
+        const form = new FormData();
+        form.append('file', currentFile);
+        form.append('signature_index', idx);
+        const res = await fetch(`${API_BASE}/api/trust-signer`, { method: 'POST', body: form });
+        const trustData = await res.json();
+        if (!res.ok) throw new Error(trustData.detail || 'Failed to trust signer');
+
+        noteEl.style.display = 'block';
+        noteEl.textContent = `✓ Trusted: ${trustData.subject}. Re-verifying…`;
+        btn.style.display = 'none';
+
+        // Re-run verification now that the cert is trusted
+        checkBtn.click();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Trust this signer';
+        noteEl.style.display = 'block';
+        noteEl.style.color = 'var(--red-bright)';
+        noteEl.textContent = 'Error: ' + e.message;
+      }
+    });
+  });
 }
 
 checkBtn.addEventListener('click', async () => {
